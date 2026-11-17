@@ -1,0 +1,121 @@
+# Configuración de telesesgo. Rutas relativas a este fichero.
+data_dir: data
+db_path: data/telesesgo.db
+
+# Cuántos episodios recientes mirar por fuente como mínimo (con `run FECHA` se amplía solo según la antigüedad).
+discover_limit: 3
+# Ignorar emisiones más antiguas que N días.
+max_age_days: 3
+# Borrar el audio comprimido tras transcribir (la transcripción queda en BD/JSON).
+delete_audio_after_transcribe: false
+
+sources:
+  - key: rtve_td1
+    edition: mediodia
+    channel: La 1 (RTVE)
+    program: Telediario 1 (15h)
+    type: rtve
+    program_id: 45030
+  - key: rtve_td2
+    edition: noche
+    channel: La 1 (RTVE)
+    program: Telediario 2 (21h)
+    type: rtve
+    program_id: 135930
+  - key: a3_noticias1
+    edition: mediodia
+    channel: Antena 3
+    program: Antena 3 Noticias 1 (15h)
+    type: atresplayer
+    format_id: 5a7858647ed1a8991dc362df
+  - key: a3_noticias2
+    edition: noche
+    channel: Antena 3
+    program: Antena 3 Noticias 2 (21h)
+    type: atresplayer
+    format_id: 5a7858667ed1a8991dc362e5
+  - key: lasexta_14h
+    edition: mediodia
+    channel: laSexta
+    program: laSexta Noticias 14:00
+    type: atresplayer
+    format_id: 5a786ce27ed1a8991cb24494
+  - key: lasexta_20h
+    edition: noche
+    channel: laSexta
+    program: laSexta Noticias 20:00
+    type: atresplayer
+    format_id: 5a786ce47ed1a8991cb2449a
+  # Fuente genérica: cualquier listado que yt-dlp sepa recorrer (playlist, canal...).
+  # Se filtra por título y duración mínima para quedarse con ediciones completas.
+  # - key: ejemplo_ytdlp
+  #   channel: Cadena X
+  #   program: Informativo
+  #   type: ytdlp
+  #   url: https://www.youtube.com/@canal/videos
+  #   title_regex: "(?i)informativo.*completo"
+  #   min_duration_s: 1200
+  #   enabled: false
+
+download:
+  # Pista de audio en castellano; se evita la audiodescripción y el doblaje.
+  format: "ba[language^=spa][format_id!*=desc]/ba[language^=es][format_id!*=desc]/ba[format_id!*=desc]/ba"
+  # Se recodifica a mono 16 kHz Opus (~10 MB por hora). Pon null para conservar el original.
+  transcode_bitrate: 24k
+  # Para contenidos que requieran sesión: fichero cookies.txt exportado del navegador.
+  # Atresplayer pide sesión para las ediciones de hace más de ~3 días.
+  cookies_file: null
+  workers: 4
+  # Carpeta temporal de descarga (null = /tmp/telesesgo, disco de Linux). El audio final se mueve a data/audio.
+  staging_dir: null
+
+stt:
+  model: large-v3-turbo       # tiny|base|small|medium|large-v3|large-v3-turbo
+  device: auto                # auto|cuda|cpu
+  compute_type: default       # default = int8_float16 en GPU, int8 en CPU
+  language: es
+  beam_size: 1                # 1 = búsqueda voraz: ~17% más rápido que 5, misma calidad en la prueba (85/85 citas)
+  batch_size: 0               # lotes: sin ganancia en una T1200 y líneas el doble de largas
+  vad_filter: true
+  # Ayuda a Whisper con la ortografía de nombres propios frecuentes.
+  initial_prompt: >-
+    Telediario. Pedro Sánchez, Alberto Núñez Feijóo, Santiago Abascal, Yolanda Díaz,
+    Isabel Díaz Ayuso, PSOE, PP, Vox, Sumar, Podemos, ERC, Junts, PNV, Bildu, Moncloa.
+  # Quién habla: separa las voces (pyannote) y reconoce las conocidas (biblioteca de voces, `telesesgo voces`).
+  # Requiere HF_TOKEN en .env y aceptar las condiciones del modelo en Hugging Face (ver PASOS_PENDIENTES.md).
+  diarization:
+    enabled: true
+    model: pyannote/speaker-diarization-community-1
+    device: auto              # auto|cuda|cpu
+    match_threshold: 0.75     # parecido mínimo (coseno) para reconocer una voz; habitual 0.60-0.80, 0.75 es exigente
+    match_min_seconds: 8      # voz mínima de un hablante para intentar reconocerlo
+    learn_min_seconds: 20     # voz mínima para añadirlo a la biblioteca
+    learn_min_similarity: 0.50  # si no se parece a la voz guardada con ese nombre, no se mezcla
+
+llm:
+  provider: gemini
+  # `./scripts/telesesgo llm-check` lista los modelos de tu clave y prueba estos.
+  # «flash» para el análisis (calidad); los «lite» quedan de reserva (más cuota gratuita, menos finos).
+  model: gemini-3.5-flash
+  # Si el principal está saturado (503), no responde o no existe, se pasa al siguiente y se sigue con él.
+  fallback_models: [gemini-3.1-flash-lite, gemini-3.5-flash-lite]   # gemini-2.5-flash da 404 con esta clave
+  effort: high                # low|medium|high|xhigh: profundidad de razonamiento
+  max_workers: 4              # piezas de un episodio analizadas en paralelo
+  max_concurrency: 4          # tope global de peticiones simultáneas (bájalo si ves muchos 429)
+  max_retries: 6              # reintentos ante 429 (cuota) o 5xx
+  # false: solo las piezas políticas reciben análisis detallado (cultura, sucesos, etc. quedan sin puntuar).
+  # Ahorra ~40% de llamadas. Pon true para analizarlo todo, como hasta ahora.
+  analyze_non_political: false
+  # Observaciones de Gemini por franja (data/notes/<fecha>-mediodia.md / -noche.md) al final de `run`.
+  write_notes: true
+  prompt_version: v2          # v2: atribución de cada cita a medio/fuente y hablantes. Súbelo al cambiar prompts o modelo
+
+# Contexto político que se inyecta en los prompts. REVÍSALO: la clasificación
+# Gobierno/oposición depende de él y cambia con el tiempo.
+political_context: |
+  Fecha de referencia: noviembre de 2026.
+  Gobierno de España: coalición PSOE + Sumar, presidido por Pedro Sánchez (PSOE).
+  Socios parlamentarios habituales del Gobierno: ERC, Junts, PNV, EH Bildu, BNG, Podemos, Coalición Canaria.
+  Oposición principal: PP (Alberto Núñez Feijóo) y Vox (Santiago Abascal).
+  Gobiernos autonómicos: clasifícalos según el partido que gobierna cada comunidad.
+  RTVE es la corporación pública estatal; Antena 3 y laSexta pertenecen al grupo privado Atresmedia.

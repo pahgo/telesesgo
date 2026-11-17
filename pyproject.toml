@@ -1,0 +1,34 @@
+[project]
+name = "telesesgo"
+version = "0.1.0"
+description = "Pipeline ETL: descarga de telediarios, transcripción local (Whisper) y análisis de sesgo/encuadre con Gemini"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "av<16",
+    "faster-whisper>=1.2.1",
+    "google-genai>=1.40",
+    "imageio-ffmpeg>=0.8.1",
+    "pydantic>=2.14.3",
+    "pyyaml>=6.0.3",
+    "rapidfuzz>=3.14.6",
+    "yt-dlp>=2026.10.26",
+]
+
+[project.optional-dependencies]
+# Diarización (pesada: torch + modelos de HuggingFace con licencia a aceptar).
+diarize = ["pyannote.audio>=4.0"]
+# Aceleración CUDA para faster-whisper en WSL2 con GPU NVIDIA.
+cuda = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12>=9,<10"]
+
+[project.scripts]
+telesesgo = "telesesgo.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"

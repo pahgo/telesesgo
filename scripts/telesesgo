@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Punto de entrada único. Ejemplos:
+#   ./scripts/telesesgo run                     # ayer, día completo
+#   ./scripts/telesesgo run 2026-11-16 noche    # una fecha y una franja (mañana|noche|día)
+#   ./scripts/telesesgo llm-check               # comprobar la clave y el modelo de Gemini
+#   ./scripts/telesesgo status | report --date 2026-11-16 | timings | html ...
+#
+# Python y las dependencias viven en el disco de Linux (~/.cache/telesesgo/venv), no en la carpeta del proyecto:
+# si el proyecto está en C: (montado vía 9p/drvfs), arrancar Python desde ahí cuesta minutos por comando.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-${XDG_CACHE_HOME:-$HOME/.cache}/telesesgo/venv}"
+export UV_LINK_MODE="${UV_LINK_MODE:-copy}"   # caché de uv y entorno pueden estar en discos distintos
+export PYTHONDONTWRITEBYTECODE=1              # no escribir .pyc en la carpeta del proyecto (C:)
+# Certificados del sistema también para la librería de Gemini (que, si no, usa los de certifi).
+if [[ -z "${SSL_CERT_FILE:-}" && -f /etc/ssl/certs/ca-certificates.crt ]]; then
+  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+fi
+
+UV="${UV:-$(command -v uv || echo "$HOME/.local/bin/uv")}"
+if [[ ! -x "$UV" ]]; then
+  echo "No encuentro uv. Instálalo con: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  exit 1
+fi
+
+EXTRAS=(--extra cuda)
+if ! command -v nvidia-smi >/dev/null 2>&1; then EXTRAS=(); fi
+# Diarización (pyannote + torch, ~3 GB la primera vez) solo si está activada en config.yaml.
+if awk '/^  diarization:/{f=1; next} f && /^    enabled:/{print $2; exit} f && /^  [a-z]/{exit}' "$ROOT/config.yaml" | grep -qi '^true'; then
+  EXTRAS+=(--extra diarize)
+fi
+
+cd "$ROOT"
+if [[ "${1:-}" == "run" ]]; then
+  mkdir -p data
+  exec 9>data/.run.lock
+  flock -n 9 || { echo "Ya hay otra ejecución de telesesgo en curso." >&2; exit 1; }
+fi
+# --frozen: usa uv.lock tal cual; la primera vez crea el entorno (unos minutos), después arranca en segundos.
+"$UV" run --quiet --frozen "${EXTRAS[@]}" telesesgo "$@"
