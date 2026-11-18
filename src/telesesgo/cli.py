@@ -98,7 +98,7 @@ def diarize_one(cfg: Config, conn, ep_id: int, progress=None) -> bool:
 
 
 def _download_and_transcribe(cfg: Config, conn, ids: list[int] | None, transcribe: bool,
-                             on_transcribed=None, progress=None) -> None:
+                             on_transcribed=None, progress=None, while_downloading=None) -> None:
     """Descargas en paralelo; si `transcribe`, la GPU transcribe cada episodio en cuanto termina su descarga.
     `on_transcribed(id)` se llama al terminar cada transcripción (p. ej., para lanzar el análisis)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -135,6 +135,8 @@ def _download_and_transcribe(cfg: Config, conn, ids: list[int] | None, transcrib
         futures = [pool.submit(_download_worker, cfg, i, progress) for i in to_download]
         if to_download:
             log.info("Descargando %d episodios con %d en paralelo", len(to_download), workers)
+        if while_downloading:
+            while_downloading()  # p. ej., diarizar lo ya transcrito: la GPU trabaja mientras la red descarga
         if transcribe:
             # Mientras se descarga, se adelanta lo que ya estaba descargado.
             for ep in _pending(conn, "downloaded", ids):
@@ -244,6 +246,8 @@ def cmd_run(cfg, conn, args):
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    if args.sin_voces:
+        cfg.stt.diarization.enabled = False
     return run_day(cfg, conn, day, editions, use_llm=not args.no_llm, redo=args.rehacer)
 
 
@@ -423,6 +427,8 @@ def main(argv=None):
     s.add_argument("--fecha", help="igual que FECHA")
     s.add_argument("--edicion", help="igual que EDICION")
     s.add_argument("--no-llm", "--sin-ia", dest="no_llm", action="store_true", help="solo descargar y transcribir")
+    s.add_argument("--sin-voces", dest="sin_voces", action="store_true",
+                   help="no diarizar en esta ejecución (más rápido: ~3 min menos por edición)")
     s.add_argument("--rehacer", action="store_true",
                    help="borrar el análisis de esas ediciones y volver a hacerlo (conserva audio y transcripción)")
     s.set_defaults(fn=cmd_run)

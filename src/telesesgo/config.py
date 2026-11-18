@@ -39,6 +39,7 @@ class DiarizationConfig(BaseModel):
     enabled: bool = False
     model: str = "pyannote/speaker-diarization-community-1"
     device: str = "auto"                # auto|cuda|cpu (si la GPU se queda sin memoria, se pasa a CPU)
+    batch_size: int = 32                # fragmentos por lote (pyannote trae 1, mucho más lento)
     # Reconocimiento de voces conocidas (coseno entre huellas normalizadas)
     match_threshold: float = 0.75       # parecido mínimo (coseno) para dar por reconocida una voz; habitual 0.60-0.80
     match_min_seconds: float = 8.0      # voz mínima de un hablante para intentar reconocerlo

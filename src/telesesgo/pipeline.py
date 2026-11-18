@@ -235,12 +235,17 @@ def run_day(cfg: Config, conn: sqlite3.Connection, day: date, editions: set[str]
             futures.append(pool.submit(_llm_episode, cfg, llm, ep_id, p))
 
     from .cli import diarize_one
-    for ep_id in ids:  # lo que ya estaba transcrito: diarizar si falta y empezar a analizar ya
-        if _row(conn, ep_id)["status"] in ("transcribed", "segmented"):
-            diarize_one(cfg, conn, ep_id, p)
-            submit(ep_id)
+
+    def pending_transcribed():
+        """Lo que ya estaba transcrito: diarizar si falta y pasarlo a Gemini (mientras se descarga lo demás)."""
+        for ep_id in ids:
+            if _row(conn, ep_id)["status"] in ("transcribed", "segmented"):
+                diarize_one(cfg, conn, ep_id, p)
+                submit(ep_id)
+
     try:
-        _download_and_transcribe(cfg, conn, ids, transcribe=True, on_transcribed=submit, progress=p)
+        _download_and_transcribe(cfg, conn, ids, transcribe=True, on_transcribed=submit, progress=p,
+                                 while_downloading=pending_transcribed)
         for f in futures:
             f.result()
     finally:

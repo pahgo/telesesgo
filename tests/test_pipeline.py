@@ -608,13 +608,30 @@ def test_diarize_assigns_speakers_and_embeddings(tmp_path, monkeypatch):
     ann = Ann([(0, 12, "SPEAKER_00"), (12, 20, "SPEAKER_01"), (20, 33, "SPEAKER_00")])
     out = SimpleNamespace(speaker_diarization=ann, exclusive_speaker_diarization=ann,
                           speaker_embeddings=np.array([[1.0, 0, 0], [0, 1.0, 0]]))
-    monkeypatch.setattr(tr, "_diarization_pipeline", lambda dc: (lambda inp: out))
+    moves = []
+
+    class Pipe:
+        def __call__(self, inp):
+            moves.append(("run", bool(tr._model_cache)))
+            return out
+
+        def to(self, device):
+            moves.append(("to", str(device)))
+
+    tr._model_cache["whisper"] = object()  # Whisper cargado de una transcripción anterior
+    monkeypatch.setattr(tr, "_diarization_pipeline", lambda dc: Pipe())
+    monkeypatch.setattr(tr, "_diar_device", lambda dc: "cuda")
+    import torch
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: moves.append(("empty", None)))
     import faster_whisper
     monkeypatch.setattr(faster_whisper, "decode_audio", lambda path, sampling_rate: np.zeros(16000, dtype=np.float32))
     lines = [Line(l.idx, l.start, l.end, l.text) for l in LINES]
     speakers = tr.diarize(tmp_path / "a.opus", lines, cfg.stt.diarization)
     assert [l.speaker for l in lines] == ["SPEAKER_00", "SPEAKER_00", "SPEAKER_01", "SPEAKER_00", "SPEAKER_00"]
     assert speakers["SPEAKER_01"][0] == 8.0 and list(speakers["SPEAKER_01"][1]) == [0, 1.0, 0]
+    # GPU en exclusiva: Whisper liberado antes, diarización a la GPU, y de vuelta a la CPU al terminar
+    assert moves == [("to", "cuda"), ("run", False), ("to", "cpu"), ("empty", None)]
+    assert not tr._model_cache
 
 
 def test_reset_analysis_keeps_transcripts(env):
@@ -630,3 +647,27 @@ def test_reset_analysis_keeps_transcripts(env):
     assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM transcript_lines").fetchone()[0] == 2 * len(LINES)
     assert {r[0] for r in conn.execute("SELECT status FROM episodes")} == {"transcribed"}
+
+
+def test_downloads_start_before_pending_diarization(tmp_path, monkeypatch):
+    import threading
+    import time as _time
+
+    from telesesgo import cli, ingest
+    cfg = Config(data_dir=tmp_path, db_path=tmp_path / "t.db")
+    conn = db.connect(cfg.db_path)
+    conn.execute("INSERT INTO episodes (id, source_key, channel, program, external_id, air_date, url) VALUES (1, 's', 'c', 'p', 'x1', '2026-11-16', 'u')")
+    conn.commit()
+    started = threading.Event()
+    seen = []
+
+    def fake_download(cfg_, tconn, ep):
+        started.set()
+        _time.sleep(0.2)
+        db.set_status(tconn, ep["id"], "downloaded", audio_path="/a.opus")
+
+    monkeypatch.setattr(ingest, "download_episode", fake_download)
+    monkeypatch.setattr(cli, "diarize_one", lambda *a, **k: True)
+    cli._download_and_transcribe(cfg, conn, [1], transcribe=False,
+                                 while_downloading=lambda: seen.append(started.wait(2)))
+    assert seen == [True]  # la descarga ya estaba en marcha mientras se hacía el trabajo de GPU pendiente

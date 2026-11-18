@@ -30,6 +30,15 @@ class Line:
 _model_cache: dict[tuple, object] = {}
 
 
+def release_whisper() -> None:
+    """Libera Whisper de la GPU (4 GB no dan para Whisper y la diarización a la vez: si no caben, Windows pasa parte
+    a la memoria del sistema y todo va varias veces más lento). Se vuelve a cargar en ~2 s cuando haga falta."""
+    if _model_cache:
+        _model_cache.clear()
+        import gc
+        gc.collect()
+
+
 def _preload_cuda_libs() -> None:
     """Carga cuBLAS/cuDNN de los wheels nvidia-* (extra `cuda`) para que ctranslate2 los encuentre
     sin tener que exportar LD_LIBRARY_PATH."""
@@ -130,11 +139,19 @@ def _diarization_pipeline(dc):
             pipe = Pipeline.from_pretrained(dc.model, use_auth_token=token)
         if pipe is None:
             raise RuntimeError(f"No se pudo cargar {dc.model}: ¿has aceptado sus condiciones en Hugging Face?")
-        use_cuda = dc.device == "cuda" or (dc.device == "auto" and torch.cuda.is_available())
-        if use_cuda:
-            pipe.to(torch.device("cuda"))
+        for attr in ("embedding_batch_size", "segmentation_batch_size"):
+            if hasattr(pipe, attr):
+                try:
+                    setattr(pipe, attr, dc.batch_size)
+                except Exception as exc:  # versiones de pyannote sin ese ajuste
+                    log.debug("No se pudo fijar %s: %s", attr, exc)
         _diar_cache[dc.model] = pipe
     return _diar_cache[dc.model]
+
+
+def _diar_device(dc) -> str:
+    import torch
+    return "cuda" if dc.device == "cuda" or (dc.device == "auto" and torch.cuda.is_available()) else "cpu"
 
 
 def diarize(audio_path: Path, lines: list[Line], dc) -> dict[str, tuple[float, object]]:
@@ -145,15 +162,24 @@ def diarize(audio_path: Path, lines: list[Line], dc) -> dict[str, tuple[float, o
     pipe = _diarization_pipeline(dc)
     audio = decode_audio(str(audio_path), sampling_rate=16000)
     inp = {"waveform": torch.from_numpy(audio)[None], "sample_rate": 16000}
+    device = _diar_device(dc)
+    if device == "cuda":
+        release_whisper()  # la GPU, solo para la diarización mientras dura
+        pipe.to(torch.device("cuda"))
     try:
-        result = pipe(inp)
-    except (RuntimeError, torch.OutOfMemoryError) as exc:
-        if "out of memory" not in str(exc).lower():
-            raise
-        log.warning("Diarización sin memoria en la GPU; se repite en CPU (más lento)")
-        torch.cuda.empty_cache()
-        pipe.to(torch.device("cpu"))
-        result = pipe(inp)
+        try:
+            result = pipe(inp)
+        except (RuntimeError, torch.OutOfMemoryError) as exc:
+            if "out of memory" not in str(exc).lower() or device != "cuda":
+                raise
+            log.warning("Diarización sin memoria en la GPU; se repite en CPU (más lento)")
+            pipe.to(torch.device("cpu"))
+            torch.cuda.empty_cache()
+            result = pipe(inp)
+    finally:
+        if device == "cuda":  # devolver la GPU a Whisper
+            pipe.to(torch.device("cpu"))
+            torch.cuda.empty_cache()
     # pyannote 4: DiarizeOutput con la versión sin solapes y una huella por hablante
     annotation = getattr(result, "exclusive_speaker_diarization", None) or getattr(result, "speaker_diarization", result)
     embeddings = getattr(result, "speaker_embeddings", None)

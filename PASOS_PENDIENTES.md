@@ -144,6 +144,17 @@ fuentes). Para rehacerlos, sin volver a descargar ni transcribir:
 
 ## 5. Uso diario
 
+Con la diarización activada, cada edición tarda unos 3 minutos más (medido: ~4,8 s por minuto de audio en la
+T1200). Si un día quieres ir rápido, sin identificar voces: `./scripts/telesesgo run --sin-voces`.
+
+Limpieza recomendada de la biblioteca (nombres aprendidos antes de exigir nombre y apellido):
+
+```bash
+./scripts/telesesgo voces --renombrar "Vicente_Valles" "Vicente Vallés"
+./scripts/telesesgo voces --renombrar "Sandra" "Sandra Golpe"    # solo si es la presentadora de A3 Noticias 1
+./scripts/telesesgo voces --borrar "Sonia"                       # una profesora en huelga: no es útil reconocerla
+```
+
 ```bash
 ./scripts/telesesgo run            # ayer, día completo
 ./scripts/telesesgo run noche      # ayer, solo la noche

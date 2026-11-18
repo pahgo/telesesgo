@@ -116,6 +116,9 @@ def learn(cfg: Config, conn: sqlite3.Connection, episode_id: int, channel: str |
         emb = from_blob(r["embedding"])
         if emb is None or not r["name"] or r["seconds"] < dc.learn_min_seconds or r["id_source"] not in ("llm", "voz"):
             continue
+        if len(r["name"].split()) < 2:  # «Vicente» a secas: demasiado ambiguo para la biblioteca
+            log.info("Episodio %s: %s sin apellido; no se añade a la biblioteca", episode_id, r["name"])
+            continue
         cur = conn.execute("SELECT * FROM voices WHERE name = ?", (r["name"],)).fetchone()
         if cur is None:
             vid = conn.execute("INSERT INTO voices (name, role, channel, embedding, samples, seconds) VALUES (?, ?, ?, ?, 1, ?)",

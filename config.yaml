@@ -87,6 +87,7 @@ stt:
     enabled: true
     model: pyannote/speaker-diarization-community-1
     device: auto              # auto|cuda|cpu
+    batch_size: 32            # fragmentos por lote (pyannote trae 1, mucho más lento)
     match_threshold: 0.75     # parecido mínimo (coseno) para reconocer una voz; habitual 0.60-0.80, 0.75 es exigente
     match_min_seconds: 8      # voz mínima de un hablante para intentar reconocerlo
     learn_min_seconds: 20     # voz mínima para añadirlo a la biblioteca
@@ -96,9 +97,9 @@ llm:
   provider: gemini
   # `./scripts/telesesgo llm-check` lista los modelos de tu clave y prueba estos.
   # «flash» para el análisis (calidad); los «lite» quedan de reserva (más cuota gratuita, menos finos).
-  model: gemini-3.5-flash
+  model: gemini-3.5-flash-lite
   # Si el principal está saturado (503), no responde o no existe, se pasa al siguiente y se sigue con él.
-  fallback_models: [gemini-3.1-flash-lite, gemini-3.5-flash-lite]   # gemini-2.5-flash da 404 con esta clave
+  fallback_models: [gemini-3.1-flash-lite, gemini-3.8-flash]   # gemini-2.5-flash da 404 con esta clave
   effort: high                # low|medium|high|xhigh: profundidad de razonamiento
   max_workers: 4              # piezas de un episodio analizadas en paralelo
   max_concurrency: 4          # tope global de peticiones simultáneas (bájalo si ves muchos 429)
