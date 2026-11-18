@@ -1,4 +1,7 @@
-data/
+data/*
+!data/reports/
+data/reports/*
+!data/reports/*.html
 .env
 .venv/
 __pycache__/
